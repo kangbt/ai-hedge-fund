@@ -11,7 +11,7 @@ import numpy as np
 import itertools
 
 from src.llm.models import LLM_ORDER, OLLAMA_LLM_ORDER, get_model_info, ModelProvider
-from src.utils.analysts import ANALYST_ORDER
+from src.utils.analysts import ANALYST_ORDER, get_analyst_choices
 from src.main import run_hedge_fund
 from src.tools.api import (
     get_company_news,
@@ -23,6 +23,7 @@ from src.tools.api import (
 from src.utils.display import print_backtest_results, format_backtest_row
 from typing_extensions import Callable
 from src.utils.ollama import ensure_ollama_and_model
+from src.utils.language import Language, translate_agent_name, translate_text
 
 init(autoreset=True)
 
@@ -39,6 +40,7 @@ class Backtester:
         model_provider: str = "OpenAI",
         selected_analysts: list[str] = [],
         initial_margin_requirement: float = 0.0,
+        language: str = "zh",
     ):
         """
         :param agent: The trading agent (Callable).
@@ -59,6 +61,9 @@ class Backtester:
         self.model_name = model_name
         self.model_provider = model_provider
         self.selected_analysts = selected_analysts
+        self.language = (
+            language if isinstance(language, Language) else Language.from_value(language)
+        )
 
         # Initialize portfolio with support for long/short positions
         self.portfolio_values = []
@@ -265,7 +270,7 @@ class Backtester:
 
     def prefetch_data(self):
         """Pre-fetch all data needed for the backtest period."""
-        print("\nPre-fetching data for the entire backtest period...")
+        print(translate_text("backtest.prefetch_start", self.language))
 
         # Convert end_date string to datetime, fetch up to 1 year before
         end_date_dt = datetime.strptime(self.end_date, "%Y-%m-%d")
@@ -285,7 +290,7 @@ class Backtester:
             # Fetch company news
             get_company_news(ticker, self.end_date, start_date=self.start_date, limit=1000)
 
-        print("Data pre-fetch complete.")
+        print(translate_text("backtest.prefetch_complete", self.language))
 
     def run_backtest(self):
         # Pre-fetch all data at the start
@@ -295,7 +300,7 @@ class Backtester:
         table_rows = []
         performance_metrics = {"sharpe_ratio": None, "sortino_ratio": None, "max_drawdown": None, "long_short_ratio": None, "gross_exposure": None, "net_exposure": None}
 
-        print("\nStarting backtest...")
+        print(translate_text("backtest.start", self.language))
 
         # Initialize portfolio values list with initial capital
         if len(dates) > 0:
@@ -321,22 +326,55 @@ class Backtester:
                     try:
                         price_data = get_price_data(ticker, previous_date_str, current_date_str)
                         if price_data.empty:
-                            print(f"Warning: No price data for {ticker} on {current_date_str}")
+                            print(
+                                translate_text(
+                                    "backtest.warning.no_price_data",
+                                    self.language,
+                                    "Warning: No price data for {ticker} on {date}",
+                                    ticker=ticker,
+                                    date=current_date_str,
+                                )
+                            )
                             missing_data = True
                             break
                         current_prices[ticker] = price_data.iloc[-1]["close"]
                     except Exception as e:
-                        print(f"Error fetching price for {ticker} between {previous_date_str} and {current_date_str}: {e}")
+                        print(
+                            translate_text(
+                                "backtest.error.fetch_price_range",
+                                self.language,
+                                "Error fetching price for {ticker} between {start} and {end}: {error}",
+                                ticker=ticker,
+                                start=previous_date_str,
+                                end=current_date_str,
+                                error=e,
+                            )
+                        )
                         missing_data = True
                         break
 
                 if missing_data:
-                    print(f"Skipping trading day {current_date_str} due to missing price data")
+                    print(
+                        translate_text(
+                            "backtest.warning.skip_day_missing_data",
+                            self.language,
+                            "Skipping trading day {date} due to missing price data",
+                            date=current_date_str,
+                        )
+                    )
                     continue
 
             except Exception as e:
                 # If there's a general API error, log it and skip this day
-                print(f"Error fetching prices for {current_date_str}: {e}")
+                print(
+                    translate_text(
+                        "backtest.error.fetch_prices_day",
+                        self.language,
+                        "Error fetching prices for {date}: {error}",
+                        date=current_date_str,
+                        error=e,
+                    )
+                )
                 continue
 
             # ---------------------------------------------------------------
@@ -350,6 +388,7 @@ class Backtester:
                 model_name=self.model_name,
                 model_provider=self.model_provider,
                 selected_analysts=self.selected_analysts,
+                language=self.language,
             )
             decisions = output["decisions"]
             analyst_signals = output["analyst_signals"]
@@ -409,19 +448,20 @@ class Backtester:
 
                 # Append the agent action to the table rows
                 date_rows.append(
-                  format_backtest_row(
-                      date=current_date_str,
-                      ticker=ticker,
-                      action=action,
-                      quantity=quantity,
-                      price=current_prices[ticker],
-                      long_shares=pos["long"],
-                      short_shares=pos["short"],
-                      position_value=net_position_value,
-                      bullish_count=bullish_count,
-                      bearish_count=bearish_count,
-                      neutral_count=neutral_count,
-                  )
+                    format_backtest_row(
+                        date=current_date_str,
+                        ticker=ticker,
+                        action=action,
+                        quantity=quantity,
+                        price=current_prices[ticker],
+                        long_shares=pos["long"],
+                        short_shares=pos["short"],
+                        position_value=net_position_value,
+                        bullish_count=bullish_count,
+                        bearish_count=bearish_count,
+                        neutral_count=neutral_count,
+                        language=self.language,
+                    )
                 )
             # ---------------------------------------------------------------
             # 4) Calculate performance summary metrics
@@ -452,11 +492,12 @@ class Backtester:
                     sharpe_ratio=performance_metrics["sharpe_ratio"],
                     sortino_ratio=performance_metrics["sortino_ratio"],
                     max_drawdown=performance_metrics["max_drawdown"],
+                    language=self.language,
                 ),
             )
 
             table_rows = date_rows + table_rows
-            print_backtest_results(table_rows)
+            print_backtest_results(table_rows, language=self.language)
 
             # Update performance metrics if we have enough data
             if len(self.portfolio_values) > 3:
@@ -519,30 +560,37 @@ class Backtester:
     def analyze_performance(self):
         """Creates a performance DataFrame, prints summary stats, and plots equity curve."""
         if not self.portfolio_values:
-            print("No portfolio data found. Please run the backtest first.")
+            print(translate_text("backtest.no_portfolio_data", self.language))
             return pd.DataFrame()
 
         performance_df = pd.DataFrame(self.portfolio_values).set_index("Date")
         if performance_df.empty:
-            print("No valid performance data to analyze.")
+            print(translate_text("backtest.no_performance_data", self.language))
             return performance_df
 
         final_portfolio_value = performance_df["Portfolio Value"].iloc[-1]
         total_return = ((final_portfolio_value - self.initial_capital) / self.initial_capital) * 100
 
-        print(f"\n{Fore.WHITE}{Style.BRIGHT}PORTFOLIO PERFORMANCE SUMMARY:{Style.RESET_ALL}")
-        print(f"Total Return: {Fore.GREEN if total_return >= 0 else Fore.RED}{total_return:.2f}%{Style.RESET_ALL}")
+        summary_heading = translate_text("backtest.performance_summary", self.language)
+        total_return_label = translate_text("backtest.total_return", self.language)
+        print(f"\n{Fore.WHITE}{Style.BRIGHT}{summary_heading}{Style.RESET_ALL}")
+        print(
+            f"{total_return_label}: {Fore.GREEN if total_return >= 0 else Fore.RED}{total_return:.2f}%{Style.RESET_ALL}"
+        )
 
         # Print realized P&L for informational purposes only
         total_realized_gains = sum(self.portfolio["realized_gains"][ticker]["long"] + self.portfolio["realized_gains"][ticker]["short"] for ticker in self.tickers)
-        print(f"Total Realized Gains/Losses: {Fore.GREEN if total_realized_gains >= 0 else Fore.RED}${total_realized_gains:,.2f}{Style.RESET_ALL}")
+        realized_label = translate_text("backtest.total_realized_gains", self.language)
+        print(
+            f"{realized_label}: {Fore.GREEN if total_realized_gains >= 0 else Fore.RED}${total_realized_gains:,.2f}{Style.RESET_ALL}"
+        )
 
         # Plot the portfolio value over time
         plt.figure(figsize=(12, 6))
         plt.plot(performance_df.index, performance_df["Portfolio Value"], color="blue")
-        plt.title("Portfolio Value Over Time")
-        plt.ylabel("Portfolio Value ($)")
-        plt.xlabel("Date")
+        plt.title(translate_text("backtest.chart.portfolio_value_title", self.language))
+        plt.ylabel(translate_text("backtest.chart.portfolio_value_ylabel", self.language))
+        plt.xlabel(translate_text("backtest.chart.portfolio_value_xlabel", self.language))
         plt.grid(True)
         plt.show()
 
@@ -557,7 +605,8 @@ class Backtester:
             annualized_sharpe = np.sqrt(252) * ((mean_daily_return - daily_rf) / std_daily_return)
         else:
             annualized_sharpe = 0
-        print(f"\nSharpe Ratio: {Fore.YELLOW}{annualized_sharpe:.2f}{Style.RESET_ALL}")
+        sharpe_label = translate_text("backtest.sharpe_ratio", self.language)
+        print(f"\n{sharpe_label}: {Fore.YELLOW}{annualized_sharpe:.2f}{Style.RESET_ALL}")
 
         # Use the max drawdown value calculated during the backtest if available
         max_drawdown = getattr(self, "performance_metrics", {}).get("max_drawdown")
@@ -571,15 +620,28 @@ class Backtester:
             max_drawdown_date = drawdown.idxmin().strftime("%Y-%m-%d") if pd.notnull(drawdown.idxmin()) else None
 
         if max_drawdown_date:
-            print(f"Maximum Drawdown: {Fore.RED}{abs(max_drawdown):.2f}%{Style.RESET_ALL} (on {max_drawdown_date})")
+            max_drawdown_text = translate_text(
+                "backtest.max_drawdown_with_date",
+                self.language,
+                "Maximum Drawdown: {value}% (on {date})",
+                value=f"{abs(max_drawdown):.2f}",
+                date=max_drawdown_date,
+            )
         else:
-            print(f"Maximum Drawdown: {Fore.RED}{abs(max_drawdown):.2f}%{Style.RESET_ALL}")
+            max_drawdown_text = translate_text(
+                "backtest.max_drawdown",
+                self.language,
+                "Maximum Drawdown: {value}%",
+                value=f"{abs(max_drawdown):.2f}",
+            )
+        print(f"{Fore.RED}{max_drawdown_text}{Style.RESET_ALL}")
 
         # Win Rate
         winning_days = len(performance_df[performance_df["Daily Return"] > 0])
         total_days = max(len(performance_df) - 1, 1)
         win_rate = (winning_days / total_days) * 100
-        print(f"Win Rate: {Fore.GREEN}{win_rate:.2f}%{Style.RESET_ALL}")
+        win_rate_label = translate_text("backtest.win_rate", self.language)
+        print(f"{win_rate_label}: {Fore.GREEN}{win_rate:.2f}%{Style.RESET_ALL}")
 
         # Average Win/Loss Ratio
         positive_returns = performance_df[performance_df["Daily Return"] > 0]["Daily Return"]
@@ -590,7 +652,8 @@ class Backtester:
             win_loss_ratio = avg_win / avg_loss
         else:
             win_loss_ratio = float("inf") if avg_win > 0 else 0
-        print(f"Win/Loss Ratio: {Fore.GREEN}{win_loss_ratio:.2f}{Style.RESET_ALL}")
+        win_loss_label = translate_text("backtest.win_loss_ratio", self.language)
+        print(f"{win_loss_label}: {Fore.GREEN}{win_loss_ratio:.2f}{Style.RESET_ALL}")
 
         # Maximum Consecutive Wins / Losses
         returns_binary = (performance_df["Daily Return"] > 0).astype(int)
@@ -601,8 +664,10 @@ class Backtester:
             max_consecutive_wins = 0
             max_consecutive_losses = 0
 
-        print(f"Max Consecutive Wins: {Fore.GREEN}{max_consecutive_wins}{Style.RESET_ALL}")
-        print(f"Max Consecutive Losses: {Fore.RED}{max_consecutive_losses}{Style.RESET_ALL}")
+        max_wins_label = translate_text("backtest.max_consecutive_wins", self.language)
+        max_losses_label = translate_text("backtest.max_consecutive_losses", self.language)
+        print(f"{max_wins_label}: {Fore.GREEN}{max_consecutive_wins}{Style.RESET_ALL}")
+        print(f"{max_losses_label}: {Fore.RED}{max_consecutive_losses}{Style.RESET_ALL}")
 
         return performance_df
 
@@ -654,11 +719,20 @@ if __name__ == "__main__":
         help="Use all available analysts (overrides --analysts)",
     )
     parser.add_argument("--ollama", action="store_true", help="Use Ollama for local LLM inference")
+    parser.add_argument(
+        "--language",
+        type=str,
+        choices=[lang.value for lang in Language],
+        default=Language.ZH.value,
+        help="Output language (zh/en/both). Defaults to zh.",
+    )
 
     args = parser.parse_args()
 
     # Parse tickers from comma-separated string
     tickers = [ticker.strip() for ticker in args.tickers.split(",")] if args.tickers else []
+
+    language = Language.from_value(args.language)
 
     # Parse analysts from command-line flags
     selected_analysts = None
@@ -668,11 +742,12 @@ if __name__ == "__main__":
         selected_analysts = [a.strip() for a in args.analysts.split(",") if a.strip()]
     else:
         # Choose analysts interactively
+        analyst_choices = get_analyst_choices(language)
         choices = questionary.checkbox(
-            "Use the Space bar to select/unselect analysts.",
-            choices=[questionary.Choice(display, value=value) for display, value in ANALYST_ORDER],
-            instruction="\n\nPress 'a' to toggle all.\n\nPress Enter when done to run the hedge fund.",
-            validate=lambda x: len(x) > 0 or "You must select at least one analyst.",
+            translate_text("cli.select_analysts", language, "Select your AI analysts."),
+            choices=[questionary.Choice(display, value=value) for display, value in analyst_choices],
+            instruction=translate_text("cli.instructions", language),
+            validate=lambda x: len(x) > 0 or translate_text("cli.validation.select_one", language),
             style=questionary.Style(
                 [
                     ("checkbox-selected", "fg:green"),
@@ -683,22 +758,26 @@ if __name__ == "__main__":
             ),
         ).ask()
         if not choices:
-            print("\n\nInterrupt received. Exiting...")
+            print(translate_text("cli.interrupt", language, "\n\nInterrupt received. Exiting..."))
             sys.exit(0)
         else:
             selected_analysts = choices
-            print(f"\nSelected analysts: " f"{', '.join(Fore.GREEN + choice.title().replace('_', ' ') + Style.RESET_ALL for choice in choices)}")
+            names = ", ".join(
+                f"{Fore.GREEN}{translate_agent_name(choice, language)}{Style.RESET_ALL}"
+                for choice in choices
+            )
+            print(translate_text("cli.selected_analysts", language, names=names))
 
     # Select LLM model based on whether Ollama is being used
     model_name = ""
     model_provider = None
 
     if args.ollama:
-        print(f"{Fore.CYAN}Using Ollama for local LLM inference.{Style.RESET_ALL}")
+        print(f"{Fore.CYAN}{translate_text('cli.using_ollama', language)}{Style.RESET_ALL}")
 
         # Select from Ollama-specific models
         model_name = questionary.select(
-            "Select your Ollama model:",
+            translate_text("cli.select_ollama_model", language, "Select your Ollama model:"),
             choices=[questionary.Choice(display, value=value) for display, value, _ in OLLAMA_LLM_ORDER],
             style=questionary.Style(
                 [
@@ -711,26 +790,36 @@ if __name__ == "__main__":
         ).ask()
 
         if not model_name:
-            print("\n\nInterrupt received. Exiting...")
+            print(translate_text("cli.interrupt", language, "\n\nInterrupt received. Exiting..."))
             sys.exit(0)
 
         if model_name == "-":
-            model_name = questionary.text("Enter the custom model name:").ask()
+            model_name = questionary.text(translate_text("cli.enter_custom_model", language)).ask()
             if not model_name:
-                print("\n\nInterrupt received. Exiting...")
+                print(translate_text("cli.interrupt", language, "\n\nInterrupt received. Exiting..."))
                 sys.exit(0)
 
         # Ensure Ollama is installed, running, and the model is available
         if not ensure_ollama_and_model(model_name):
-            print(f"{Fore.RED}Cannot proceed without Ollama and the selected model.{Style.RESET_ALL}")
+            print(
+                f"{Fore.RED}{translate_text('cli.cannot_proceed_ollama', language, 'Cannot proceed without Ollama and the selected model.')}{Style.RESET_ALL}"
+            )
             sys.exit(1)
 
         model_provider = ModelProvider.OLLAMA.value
-        print(f"\nSelected {Fore.CYAN}Ollama{Style.RESET_ALL} model: {Fore.GREEN + Style.BRIGHT}{model_name}{Style.RESET_ALL}\n")
+        provider_text = f"{Fore.CYAN}Ollama{Style.RESET_ALL}"
+        model_text = f"{Fore.GREEN + Style.BRIGHT}{model_name}{Style.RESET_ALL}"
+        message = translate_text(
+            "cli.selected_model",
+            language,
+            provider=provider_text,
+            model=model_text,
+        )
+        print(f"\n{message}\n")
     else:
         # Use the standard cloud-based LLM selection
         model_choice = questionary.select(
-            "Select your LLM model:",
+            translate_text("cli.select_llm", language, "Select your LLM model:"),
             choices=[questionary.Choice(display, value=(name, provider)) for display, name, provider in LLM_ORDER],
             style=questionary.Style(
                 [
@@ -743,23 +832,37 @@ if __name__ == "__main__":
         ).ask()
 
         if not model_choice:
-            print("\n\nInterrupt received. Exiting...")
+            print(translate_text("cli.interrupt", language, "\n\nInterrupt received. Exiting..."))
             sys.exit(0)
-        
+
         model_name, model_provider = model_choice
 
         model_info = get_model_info(model_name, model_provider)
         if model_info:
             if model_info.is_custom():
-                model_name = questionary.text("Enter the custom model name:").ask()
+                model_name = questionary.text(translate_text("cli.enter_custom_model", language)).ask()
                 if not model_name:
-                    print("\n\nInterrupt received. Exiting...")
+                    print(translate_text("cli.interrupt", language, "\n\nInterrupt received. Exiting..."))
                     sys.exit(0)
 
-            print(f"\nSelected {Fore.CYAN}{model_provider}{Style.RESET_ALL} model: {Fore.GREEN + Style.BRIGHT}{model_name}{Style.RESET_ALL}\n")
+            provider_text = f"{Fore.CYAN}{model_provider}{Style.RESET_ALL}"
+            model_text = f"{Fore.GREEN + Style.BRIGHT}{model_name}{Style.RESET_ALL}"
+            message = translate_text(
+                "cli.selected_model",
+                language,
+                provider=provider_text,
+                model=model_text,
+            )
+            print(f"\n{message}\n")
         else:
             model_provider = "Unknown"
-            print(f"\nSelected model: {Fore.GREEN + Style.BRIGHT}{model_name}{Style.RESET_ALL}\n")
+            model_text = f"{Fore.GREEN + Style.BRIGHT}{model_name}{Style.RESET_ALL}"
+            generic_message = translate_text(
+                "cli.selected_model_generic",
+                language,
+                model=model_text,
+            )
+            print(generic_message)
 
     # Create and run the backtester
     backtester = Backtester(
@@ -772,6 +875,7 @@ if __name__ == "__main__":
         model_provider=model_provider,
         selected_analysts=selected_analysts,
         initial_margin_requirement=args.margin_requirement,
+        language=language,
     )
 
     performance_metrics = backtester.run_backtest()

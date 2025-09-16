@@ -78,7 +78,7 @@ OPENAI_API_KEY=your-openai-api-key
 FINANCIAL_DATASETS_API_KEY=your-financial-datasets-api-key
 ```
 
-**Important**: You must set at least one LLM API key (e.g. `OPENAI_API_KEY`, `GROQ_API_KEY`, `ANTHROPIC_API_KEY`, or `DEEPSEEK_API_KEY`) for the hedge fund to work. 
+**Important**: You must set at least one LLM API key (e.g. `OPENAI_API_KEY`, `GROQ_API_KEY`, `ANTHROPIC_API_KEY`, `DEEPSEEK_API_KEY`, or `DASHSCOPE_API_KEY`) for the hedge fund to work.
 
 **Financial Data**: Data for AAPL, GOOGL, MSFT, NVDA, and TSLA is free and does not require an API key. For any other ticker, you will need to set the `FINANCIAL_DATASETS_API_KEY` in the .env file.
 
@@ -118,6 +118,17 @@ You can optionally specify the start and end dates to make decisions over a spec
 ```bash
 poetry run python src/main.py --ticker AAPL,MSFT,NVDA --start-date 2024-01-01 --end-date 2024-03-01
 ```
+
+#### Multi-language output
+
+All prompts, progress messages, and trading results default to Simplified Chinese. You can switch to English or show both languages using the `--language` flag:
+
+```bash
+poetry run python src/main.py --tickers AAPL,MSFT --language en
+poetry run python src/main.py --tickers TSLA --language both
+```
+
+The web application includes the same language selector in the portfolio start node, making it easy to toggle between 中文、English、or bilingual output before running a flow or backtest.
 
 #### Run the Backtester
 ```bash

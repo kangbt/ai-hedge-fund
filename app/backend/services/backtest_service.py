@@ -14,6 +14,8 @@ from src.tools.api import (
 )
 from app.backend.services.graph import run_graph_async, parse_hedge_fund_response
 from app.backend.services.portfolio import create_portfolio
+from src.utils.language import Language
+
 
 class BacktestService:
     """
@@ -32,10 +34,11 @@ class BacktestService:
         model_name: str = "gpt-4.1",
         model_provider: str = "OpenAI",
         request: dict = {},
+        language: Language = Language.ZH,
     ):
         """
         Initialize the backtest service.
-        
+
         :param graph: Pre-compiled LangGraph graph for trading decisions.
         :param portfolio: Initial portfolio state.
         :param tickers: List of tickers to backtest.
@@ -56,6 +59,7 @@ class BacktestService:
         self.model_provider = model_provider
         self.request = request
         self.portfolio_values = []
+        self.language = language
 
     def execute_trade(self, ticker: str, action: str, quantity: float, current_price: float) -> int:
         """
@@ -318,13 +322,15 @@ class BacktestService:
 
             # Send progress update if callback provided
             if progress_callback:
-                progress_callback({
-                    "type": "progress",
-                    "current_date": current_date_str,
-                    "progress": (i + 1) / len(dates),
-                    "total_dates": len(dates),
-                    "current_step": i + 1,
-                })
+                progress_callback(
+                    {
+                        "type": "progress",
+                        "current_date": current_date_str,
+                        "progress": (i + 1) / len(dates),
+                        "total_dates": len(dates),
+                        "current_step": i + 1,
+                    }
+                )
 
             # Get current prices
             try:
@@ -349,13 +355,8 @@ class BacktestService:
                 continue
 
             # Create portfolio for this iteration
-            portfolio_for_graph = create_portfolio(
-                initial_cash=self.portfolio["cash"],
-                margin_requirement=self.portfolio["margin_requirement"],
-                tickers=self.tickers,
-                portfolio_positions=[]  # We'll handle positions manually
-            )
-            
+            portfolio_for_graph = create_portfolio(initial_cash=self.portfolio["cash"], margin_requirement=self.portfolio["margin_requirement"], tickers=self.tickers, portfolio_positions=[])  # We'll handle positions manually
+
             # Copy current portfolio state to the graph portfolio
             portfolio_for_graph.update(self.portfolio)
 
@@ -369,9 +370,10 @@ class BacktestService:
                     end_date=current_date_str,
                     model_name=self.model_name,
                     model_provider=self.model_provider,
+                    language=self.language.value,
                     request=self.request,
                 )
-                
+
                 # Parse the decisions from the graph result
                 if result and result.get("messages"):
                     decisions = parse_hedge_fund_response(result["messages"][-1].content)
@@ -379,7 +381,7 @@ class BacktestService:
                 else:
                     decisions = {}
                     analyst_signals = {}
-                    
+
             except Exception as e:
                 print(f"Error running graph for {current_date_str}: {e}")
                 decisions = {}
@@ -404,19 +406,21 @@ class BacktestService:
             long_short_ratio = long_exposure / short_exposure if short_exposure > 1e-9 else None
 
             # Track portfolio value
-            self.portfolio_values.append({
-                "Date": current_date,
-                "Portfolio Value": total_value,
-                "Long Exposure": long_exposure,
-                "Short Exposure": short_exposure,
-                "Gross Exposure": gross_exposure,
-                "Net Exposure": net_exposure,
-                "Long/Short Ratio": long_short_ratio,
-            })
+            self.portfolio_values.append(
+                {
+                    "Date": current_date,
+                    "Portfolio Value": total_value,
+                    "Long Exposure": long_exposure,
+                    "Short Exposure": short_exposure,
+                    "Gross Exposure": gross_exposure,
+                    "Net Exposure": net_exposure,
+                    "Long/Short Ratio": long_short_ratio,
+                }
+            )
 
             # Calculate performance metrics for this day
             portfolio_return = (total_value / self.initial_capital - 1) * 100
-            
+
             # Update performance metrics if we have enough data
             if len(self.portfolio_values) > 2:
                 self._update_performance_metrics(performance_metrics)
@@ -438,7 +442,7 @@ class BacktestService:
                 "portfolio_return": portfolio_return,
                 "performance_metrics": performance_metrics.copy(),
                 # Add detailed trading information for each ticker
-                "ticker_details": []
+                "ticker_details": [],
             }
 
             # Build ticker details (similar to CLI format_backtest_row)
@@ -475,17 +479,19 @@ class BacktestService:
                     "bearish_count": bearish_count,
                     "neutral_count": neutral_count,
                 }
-                
+
                 date_result["ticker_details"].append(ticker_detail)
 
             backtest_results.append(date_result)
 
             # Send intermediate result if callback provided
             if progress_callback:
-                progress_callback({
-                    "type": "backtest_result",
-                    "data": date_result,
-                })
+                progress_callback(
+                    {
+                        "type": "backtest_result",
+                        "data": date_result,
+                    }
+                )
 
         # Ensure final performance metrics are calculated
         if len(self.portfolio_values) > 1:
@@ -532,5 +538,5 @@ class BacktestService:
 
         # Calculate additional metrics
         performance_df["Daily Return"] = performance_df["Portfolio Value"].pct_change().fillna(0)
-        
-        return performance_df 
+
+        return performance_df

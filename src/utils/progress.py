@@ -6,6 +6,13 @@ from rich.style import Style
 from rich.text import Text
 from typing import Dict, Optional, Callable, List
 
+from src.utils.language import (
+    DEFAULT_LANGUAGE,
+    Language,
+    translate_agent_name,
+    translate_status,
+)
+
 console = Console()
 
 
@@ -18,6 +25,12 @@ class AgentProgress:
         self.live = Live(self.table, console=console, refresh_per_second=4)
         self.started = False
         self.update_handlers: List[Callable[[str, Optional[str], str], None]] = []
+        self.language: Language = DEFAULT_LANGUAGE
+
+    def set_language(self, language: Language):
+        """Change the language used for progress updates."""
+
+        self.language = language
 
     def register_handler(self, handler: Callable[[str, Optional[str], str], None]):
         """Register a handler to be called when agent status updates."""
@@ -52,7 +65,7 @@ class AgentProgress:
             self.agent_status[agent_name]["status"] = status
         if analysis:
             self.agent_status[agent_name]["analysis"] = analysis
-        
+
         # Set the timestamp as UTC datetime
         timestamp = datetime.now(timezone.utc).isoformat()
         self.agent_status[agent_name]["timestamp"] = timestamp
@@ -65,11 +78,19 @@ class AgentProgress:
 
     def get_all_status(self):
         """Get the current status of all agents as a dictionary."""
-        return {agent_name: {"ticker": info["ticker"], "status": info["status"], "display_name": self._get_display_name(agent_name)} for agent_name, info in self.agent_status.items()}
+        return {
+            agent_name: {
+                "ticker": info["ticker"],
+                "status": info["status"],
+                "display_name": self._get_display_name(agent_name),
+            }
+            for agent_name, info in self.agent_status.items()
+        }
 
     def _get_display_name(self, agent_name: str) -> str:
         """Convert agent_name to a display-friendly format."""
-        return agent_name.replace("_agent", "").replace("_", " ").title()
+        base_key = agent_name.replace("_agent", "")
+        return translate_agent_name(base_key, self.language)
 
     def _refresh_display(self):
         """Refresh the progress display."""
@@ -101,13 +122,14 @@ class AgentProgress:
                 symbol = "⋯"
 
             agent_display = self._get_display_name(agent_name)
+            localized_status = translate_status(status, self.language)
             status_text = Text()
             status_text.append(f"{symbol} ", style=style)
             status_text.append(f"{agent_display:<20}", style=Style(bold=True))
 
             if ticker:
                 status_text.append(f"[{ticker}] ", style=Style(color="cyan"))
-            status_text.append(status, style=style)
+            status_text.append(localized_status, style=style)
 
             self.table.add_row(status_text)
 

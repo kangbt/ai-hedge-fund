@@ -17,6 +17,7 @@ from src.agents.valuation import valuation_analyst_agent
 from src.agents.warren_buffett import warren_buffett_agent
 from src.agents.rakesh_jhunjhunwala import rakesh_jhunjhunwala_agent
 from src.agents.mohnish_pabrai import mohnish_pabrai_agent
+from src.utils.language import Language, translate_agent_name
 
 # Define analyst configuration - single source of truth
 ANALYST_CONFIG = {
@@ -161,13 +162,20 @@ def get_analyst_nodes():
 
 def get_agents_list():
     """Get the list of agents for API responses."""
-    return [
-        {
-            "key": key,
-            "display_name": config["display_name"],
-            "description": config["description"],
-            "investing_style": config["investing_style"],
-            "order": config["order"]
-        }
-        for key, config in sorted(ANALYST_CONFIG.items(), key=lambda x: x[1]["order"])
-    ]
+    return [{"key": key, "display_name": config["display_name"], "description": config["description"], "investing_style": config["investing_style"], "order": config["order"]} for key, config in sorted(ANALYST_CONFIG.items(), key=lambda x: x[1]["order"])]
+
+
+def get_analyst_choices(language: Language):
+    """Return localized analyst display names for UI selections."""
+
+    choices = []
+    for key, config in sorted(ANALYST_CONFIG.items(), key=lambda x: x[1]["order"]):
+        display = translate_agent_name(key, language)
+        choices.append((display, key))
+    return choices
+
+
+def get_analyst_order_map():
+    """Return a mapping of analyst keys to their defined order."""
+
+    return {key: config["order"] for key, config in ANALYST_CONFIG.items()}
