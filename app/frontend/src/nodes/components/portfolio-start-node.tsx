@@ -39,6 +39,12 @@ const runModes = [
   { value: 'backtest', label: 'Backtest' },
 ];
 
+const languageOptions = [
+  { value: 'zh', label: '中文 (Chinese)' },
+  { value: 'en', label: 'English' },
+  { value: 'both', label: '中英双语 (Bilingual)' },
+];
+
 export function PortfolioStartNode({
   data,
   selected,
@@ -59,6 +65,8 @@ export function PortfolioStartNode({
   const [startDate, setStartDate] = useNodeState(id, 'startDate', threeMonthsAgo.toISOString().split('T')[0]);
   const [endDate, setEndDate] = useNodeState(id, 'endDate', today.toISOString().split('T')[0]);
   const [open, setOpen] = useState(false);
+  const [languageOpen, setLanguageOpen] = useState(false);
+  const [outputLanguage, setOutputLanguage] = useNodeState(id, 'outputLanguage', 'zh');
   
   const { currentFlowId } = useFlowContext();
   const nodeContext = useNodeContext();
@@ -210,11 +218,11 @@ export function PortfolioStartNode({
     // Check if we're in backtest mode
     if (runMode === 'backtest') {
       // Use the flow connection hook to run the backtest with selected dates
-      runBacktest({
-        tickers: tickerList,
-        // Send the actual graph structure instead of just selected analysts
-        graph_nodes: agentNodes.map(node => ({
-          id: node.id,
+        runBacktest({
+          tickers: tickerList,
+          // Send the actual graph structure instead of just selected analysts
+          graph_nodes: agentNodes.map(node => ({
+            id: node.id,
           type: node.type,
           data: node.data,
           position: node.position
@@ -224,16 +232,17 @@ export function PortfolioStartNode({
         start_date: startDate,
         end_date: endDate,
         initial_capital: parseFloat(initialCash) || 100000,
-        margin_requirement: 0.0, // Default margin requirement
-        model_name: undefined,
-        model_provider: undefined,
-        // Pass portfolio positions to backend
-        portfolio_positions: portfolioPositions,
-      });
-    } else {
-      // Use the regular hedge fund API for single run
-      runFlow({
-        tickers: tickerList,
+          margin_requirement: 0.0, // Default margin requirement
+          model_name: undefined,
+          model_provider: undefined,
+          // Pass portfolio positions to backend
+          portfolio_positions: portfolioPositions,
+          language: outputLanguage,
+        });
+      } else {
+        // Use the regular hedge fund API for single run
+        runFlow({
+          tickers: tickerList,
         // Send the actual graph structure instead of just selected agents
         graph_nodes: agentNodes.map(node => ({
           id: node.id,
@@ -247,12 +256,13 @@ export function PortfolioStartNode({
         model_name: undefined,
         model_provider: undefined,
         start_date: threeMonthsAgo.toISOString().split('T')[0],
-        end_date: today.toISOString().split('T')[0],
-        initial_cash: parseFloat(initialCash) || 100000,
-        // Pass portfolio positions to backend
-        portfolio_positions: portfolioPositions,
-      });
-    }
+          end_date: today.toISOString().split('T')[0],
+          initial_cash: parseFloat(initialCash) || 100000,
+          // Pass portfolio positions to backend
+          portfolio_positions: portfolioPositions,
+          language: outputLanguage,
+        });
+      }
   };
 
   // Determine if we're processing (connecting, connected, or any agents running)
@@ -419,6 +429,51 @@ export function PortfolioStartNode({
                     )}
                   </Button>
                 </div>
+              </div>
+              <div className="flex flex-col gap-2">
+                <div className="text-subtitle text-primary flex items-center gap-1">
+                  Output Language
+                </div>
+                <Popover open={languageOpen} onOpenChange={setLanguageOpen}>
+                  <PopoverTrigger asChild>
+                    <Button
+                      variant="outline"
+                      role="combobox"
+                      aria-expanded={languageOpen}
+                      className="justify-between h-10 px-3 py-2 bg-node border border-border hover:bg-accent"
+                    >
+                      <span className="text-subtitle">
+                        {languageOptions.find(option => option.value === outputLanguage)?.label || '中文 (Chinese)'}
+                      </span>
+                      <ChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0 bg-node border border-border shadow-lg">
+                    <Command className="bg-node">
+                      <CommandList className="bg-node">
+                        <CommandEmpty>No language found.</CommandEmpty>
+                        <CommandGroup>
+                          {languageOptions.map(option => (
+                            <CommandItem
+                              key={option.value}
+                              value={option.value}
+                              className={cn(
+                                'cursor-pointer bg-node hover:bg-accent',
+                                outputLanguage === option.value
+                              )}
+                              onSelect={(currentValue) => {
+                                setOutputLanguage(currentValue);
+                                setLanguageOpen(false);
+                              }}
+                            >
+                              {option.label}
+                            </CommandItem>
+                          ))}
+                        </CommandGroup>
+                      </CommandList>
+                    </Command>
+                  </PopoverContent>
+                </Popover>
               </div>
               {runMode === 'backtest' && (
                 <div className="flex flex-col gap-4">

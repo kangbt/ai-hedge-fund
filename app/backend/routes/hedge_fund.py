@@ -11,9 +11,11 @@ from app.backend.services.portfolio import create_portfolio
 from app.backend.services.backtest_service import BacktestService
 from app.backend.services.api_key_service import ApiKeyService
 from src.utils.progress import progress
+from src.utils.language import Language, translate_status
 from src.utils.analysts import get_agents_list
 
 router = APIRouter(prefix="/hedge-fund")
+
 
 @router.post(
     path="/run",
@@ -34,10 +36,7 @@ async def run(request_data: HedgeFundRequest, request: Request, db: Session = De
         portfolio = create_portfolio(request_data.initial_cash, request_data.margin_requirement, request_data.tickers, request_data.portfolio_positions)
 
         # Construct agent graph using the React Flow graph structure
-        graph = create_graph(
-            graph_nodes=request_data.graph_nodes,
-            graph_edges=request_data.graph_edges
-        )
+        graph = create_graph(graph_nodes=request_data.graph_nodes, graph_edges=request_data.graph_edges)
         graph = graph.compile()
 
         # Log a test progress update for debugging
@@ -66,9 +65,22 @@ async def run(request_data: HedgeFundRequest, request: Request, db: Session = De
             run_task = None
             disconnect_task = None
 
+            request_language = Language.from_value(
+                getattr(request_data.language, "value", request_data.language)
+            )
+            progress.set_language(request_language)
+
             # Simple handler to add updates to the queue
             def progress_handler(agent_name, ticker, status, analysis, timestamp):
-                event = ProgressUpdateEvent(agent=agent_name, ticker=ticker, status=status, timestamp=timestamp, analysis=analysis)
+                localized_status = translate_status(status, request_language)
+                event = ProgressUpdateEvent(
+                    agent=agent_name,
+                    ticker=ticker,
+                    status=status,
+                    localized_status=localized_status,
+                    timestamp=timestamp,
+                    analysis=analysis,
+                )
                 progress_queue.put_nowait(event)
 
             # Register our handler with the progress tracker
@@ -85,13 +97,14 @@ async def run(request_data: HedgeFundRequest, request: Request, db: Session = De
                         end_date=request_data.end_date,
                         model_name=request_data.model_name,
                         model_provider=model_provider,
+                        language=getattr(request_data.language, "value", request_data.language),
                         request=request_data,  # Pass the full request for agent-specific model access
                     )
                 )
-                
+
                 # Start the disconnect detection task
                 disconnect_task = asyncio.create_task(wait_for_disconnect())
-                
+
                 # Send initial message
                 yield StartEvent().to_sse()
 
@@ -159,6 +172,7 @@ async def run(request_data: HedgeFundRequest, request: Request, db: Session = De
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"An error occurred while processing the request: {str(e)}")
 
+
 @router.post(
     path="/backtest",
     responses={
@@ -181,12 +195,7 @@ async def backtest(request_data: BacktestRequest, request: Request, db: Session 
             model_provider = model_provider.value
 
         # Create the portfolio (same as /run endpoint)
-        portfolio = create_portfolio(
-            request_data.initial_capital, 
-            request_data.margin_requirement, 
-            request_data.tickers, 
-            request_data.portfolio_positions
-        )
+        portfolio = create_portfolio(request_data.initial_capital, request_data.margin_requirement, request_data.tickers, request_data.portfolio_positions)
 
         # Construct agent graph using the React Flow graph structure (same as /run endpoint)
         graph = create_graph(graph_nodes=request_data.graph_nodes, graph_edges=request_data.graph_edges)
@@ -203,6 +212,7 @@ async def backtest(request_data: BacktestRequest, request: Request, db: Session 
             model_name=request_data.model_name,
             model_provider=model_provider,
             request=request_data,  # Pass the full request for agent-specific model access
+            language=request_data.language,
         )
 
         # Function to detect client disconnection
@@ -222,6 +232,8 @@ async def backtest(request_data: BacktestRequest, request: Request, db: Session 
             backtest_task = None
             disconnect_task = None
 
+            progress.set_language(Language.from_value(getattr(request_data.language, "value", request_data.language)))
+
             # Global progress handler to capture individual agent updates during backtest
             def progress_handler(agent_name, ticker, status, analysis, timestamp):
                 event = ProgressUpdateEvent(agent=agent_name, ticker=ticker, status=status, timestamp=timestamp, analysis=analysis)
@@ -230,43 +242,30 @@ async def backtest(request_data: BacktestRequest, request: Request, db: Session 
             # Progress callback to handle backtest-specific updates
             def progress_callback(update):
                 if update["type"] == "progress":
-                    event = ProgressUpdateEvent(
-                        agent="backtest",
-                        ticker=None,
-                        status=f"Processing {update['current_date']} ({update['current_step']}/{update['total_dates']})",
-                        timestamp=None,
-                        analysis=None
-                    )
+                    event = ProgressUpdateEvent(agent="backtest", ticker=None, status=f"Processing {update['current_date']} ({update['current_step']}/{update['total_dates']})", timestamp=None, analysis=None)
                     progress_queue.put_nowait(event)
                 elif update["type"] == "backtest_result":
                     # Convert day result to a streaming event
                     backtest_result = BacktestDayResult(**update["data"])
-                    
+
                     # Send the full day result data as JSON in the analysis field
                     import json
+
                     analysis_data = json.dumps(update["data"])
-                    
-                    event = ProgressUpdateEvent(
-                        agent="backtest",
-                        ticker=None,
-                        status=f"Completed {backtest_result.date} - Portfolio: ${backtest_result.portfolio_value:,.2f}",
-                        timestamp=None,
-                        analysis=analysis_data
-                    )
+
+                    event = ProgressUpdateEvent(agent="backtest", ticker=None, status=f"Completed {backtest_result.date} - Portfolio: ${backtest_result.portfolio_value:,.2f}", timestamp=None, analysis=analysis_data)
                     progress_queue.put_nowait(event)
 
             # Register our handler with the progress tracker to capture agent updates
             progress.register_handler(progress_handler)
-            
+
             try:
                 # Start the backtest in a background task
-                backtest_task = asyncio.create_task(
-                    backtest_service.run_backtest_async(progress_callback=progress_callback)
-                )
-                
+                backtest_task = asyncio.create_task(backtest_service.run_backtest_async(progress_callback=progress_callback))
+
                 # Start the disconnect detection task
                 disconnect_task = asyncio.create_task(wait_for_disconnect())
-                
+
                 # Send initial message
                 yield StartEvent().to_sse()
 
@@ -349,4 +348,3 @@ async def get_agents():
         return {"agents": get_agents_list()}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to retrieve agents: {str(e)}")
-

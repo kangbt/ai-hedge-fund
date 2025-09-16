@@ -5,6 +5,10 @@ from pydantic import BaseModel
 from src.llm.models import get_model, get_model_info
 from src.utils.progress import progress
 from src.graph.state import AgentState
+from src.utils.language import Language
+
+from langchain_core.messages import BaseMessage, SystemMessage
+from langchain_core.prompts import ChatPromptValue
 
 
 def call_llm(
@@ -29,7 +33,7 @@ def call_llm(
     Returns:
         An instance of the specified Pydantic model
     """
-    
+
     # Extract model configuration if state is provided and agent_name is available
     if state and agent_name:
         model_name, model_provider = get_agent_model_config(state, agent_name)
@@ -42,11 +46,42 @@ def call_llm(
     api_keys = None
     if state:
         request = state.get("metadata", {}).get("request")
-        if request and hasattr(request, 'api_keys'):
+        if request and hasattr(request, "api_keys"):
             api_keys = request.api_keys
 
     model_info = get_model_info(model_name, model_provider)
     llm = get_model(model_name, model_provider, api_keys)
+
+    # Determine the requested output language
+    language = Language.from_value(state.get("metadata", {}).get("language")) if state else Language.ZH
+
+    def prepare_messages(prompt_value):
+        if isinstance(prompt_value, ChatPromptValue):
+            messages = list(prompt_value.to_messages())
+        elif isinstance(prompt_value, list) and all(isinstance(m, BaseMessage) for m in prompt_value):
+            messages = list(prompt_value)
+        else:
+            messages = [prompt_value]
+
+        instruction = None
+        if language == Language.ZH:
+            instruction = "请使用简体中文撰写所有文字字段，保持返回的 JSON 结构不变。"
+        elif language == Language.BOTH:
+            instruction = (
+                "请在每个文字字段中先给出简体中文内容，并在同一字段内追加英文翻译，例如：'中文说明\\nEnglish: ...'。"
+                "必须保持返回的 JSON 结构不变。"
+            )
+
+        if instruction and messages:
+            first_message = messages[0]
+            if isinstance(first_message, SystemMessage):
+                messages[0] = SystemMessage(content=f"{first_message.content}\n\n{instruction}")
+            else:
+                messages.insert(0, SystemMessage(content=instruction))
+        elif instruction:
+            messages = [SystemMessage(content=instruction)]
+
+        return messages
 
     # For non-JSON support models, we can use structured output
     if not (model_info and not model_info.has_json_mode()):
@@ -59,7 +94,8 @@ def call_llm(
     for attempt in range(max_retries):
         try:
             # Call the LLM
-            result = llm.invoke(prompt)
+            messages = prepare_messages(prompt)
+            result = llm.invoke(messages)
 
             # For non-JSON support models, we need to extract and parse the JSON manually
             if model_info and not model_info.has_json_mode():
@@ -128,20 +164,20 @@ def get_agent_model_config(state, agent_name):
     Always returns valid model_name and model_provider values.
     """
     request = state.get("metadata", {}).get("request")
-    
-    if request and hasattr(request, 'get_agent_model_config'):
+
+    if request and hasattr(request, "get_agent_model_config"):
         # Get agent-specific model configuration
         model_name, model_provider = request.get_agent_model_config(agent_name)
         # Ensure we have valid values
         if model_name and model_provider:
-            return model_name, model_provider.value if hasattr(model_provider, 'value') else str(model_provider)
-    
+            return model_name, model_provider.value if hasattr(model_provider, "value") else str(model_provider)
+
     # Fall back to global configuration (system defaults)
     model_name = state.get("metadata", {}).get("model_name") or "gpt-4.1"
     model_provider = state.get("metadata", {}).get("model_provider") or "OPENAI"
-    
+
     # Convert enum to string if necessary
-    if hasattr(model_provider, 'value'):
+    if hasattr(model_provider, "value"):
         model_provider = model_provider.value
-    
+
     return model_name, model_provider

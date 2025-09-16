@@ -9,10 +9,11 @@ from src.agents.portfolio_manager import portfolio_management_agent
 from src.agents.risk_manager import risk_management_agent
 from src.graph.state import AgentState
 from src.utils.display import print_trading_output
-from src.utils.analysts import ANALYST_ORDER, get_analyst_nodes
+from src.utils.analysts import get_analyst_nodes, get_analyst_choices
 from src.utils.progress import progress
 from src.llm.models import LLM_ORDER, OLLAMA_LLM_ORDER, get_model_info, ModelProvider
 from src.utils.ollama import ensure_ollama_and_model
+from src.utils.language import Language, translate_agent_name, translate_text
 
 import argparse
 from datetime import datetime
@@ -51,8 +52,10 @@ def run_hedge_fund(
     selected_analysts: list[str] = [],
     model_name: str = "gpt-4.1",
     model_provider: str = "OpenAI",
+    language: Language = Language.ZH,
 ):
     # Start progress tracking
+    progress.set_language(language)
     progress.start()
 
     try:
@@ -81,6 +84,7 @@ def run_hedge_fund(
                     "show_reasoning": show_reasoning,
                     "model_name": model_name,
                     "model_provider": model_provider,
+                    "language": language.value,
                 },
             },
         )
@@ -132,6 +136,10 @@ def create_workflow(selected_analysts=None):
     return workflow
 
 
+_default_workflow = create_workflow()
+app = _default_workflow.compile()
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run the hedge fund trading system")
     parser.add_argument("--initial-cash", type=float, default=100000.0, help="Initial cash position. Defaults to 100000.0)")
@@ -146,19 +154,30 @@ if __name__ == "__main__":
     parser.add_argument("--show-reasoning", action="store_true", help="Show reasoning from each agent")
     parser.add_argument("--show-agent-graph", action="store_true", help="Show the agent graph")
     parser.add_argument("--ollama", action="store_true", help="Use Ollama for local LLM inference")
+    parser.add_argument(
+        "--language",
+        type=str,
+        choices=[lang.value for lang in Language],
+        default=Language.ZH.value,
+        help="Output language (zh/en/both). Defaults to zh.",
+    )
 
     args = parser.parse_args()
+
+    language = Language.from_value(args.language)
+    progress.set_language(language)
 
     # Parse tickers from comma-separated string
     tickers = [ticker.strip() for ticker in args.tickers.split(",")]
 
     # Select analysts
     selected_analysts = None
+    analyst_choices = get_analyst_choices(language)
     choices = questionary.checkbox(
-        "Select your AI analysts.",
-        choices=[questionary.Choice(display, value=value) for display, value in ANALYST_ORDER],
-        instruction="\n\nInstructions: \n1. Press Space to select/unselect analysts.\n2. Press 'a' to select/unselect all.\n3. Press Enter when done to run the hedge fund.\n",
-        validate=lambda x: len(x) > 0 or "You must select at least one analyst.",
+        translate_text("cli.select_analysts", language, "Select your AI analysts."),
+        choices=[questionary.Choice(display, value=value) for display, value in analyst_choices],
+        instruction=translate_text("cli.instructions", language),
+        validate=lambda x: len(x) > 0 or translate_text("cli.validation.select_one", language),
         style=questionary.Style(
             [
                 ("checkbox-selected", "fg:green"),
@@ -170,22 +189,24 @@ if __name__ == "__main__":
     ).ask()
 
     if not choices:
-        print("\n\nInterrupt received. Exiting...")
+        print(translate_text("cli.interrupt", language, "\n\nInterrupt received. Exiting..."))
         sys.exit(0)
     else:
         selected_analysts = choices
-        print(f"\nSelected analysts: {', '.join(Fore.GREEN + choice.title().replace('_', ' ') + Style.RESET_ALL for choice in choices)}\n")
+        names = ", ".join(f"{Fore.GREEN}{translate_agent_name(choice, language)}{Style.RESET_ALL}" for choice in choices)
+        message = translate_text("cli.selected_analysts", language, names=names)
+        print(f"\n{message}\n")
 
     # Select LLM model based on whether Ollama is being used
     model_name = ""
     model_provider = ""
 
     if args.ollama:
-        print(f"{Fore.CYAN}Using Ollama for local LLM inference.{Style.RESET_ALL}")
+        print(f"{Fore.CYAN}{translate_text('cli.using_ollama', language)}{Style.RESET_ALL}")
 
         # Select from Ollama-specific models
         model_name: str = questionary.select(
-            "Select your Ollama model:",
+            translate_text("cli.select_ollama_model", language, "Select your Ollama model:"),
             choices=[questionary.Choice(display, value=value) for display, value, _ in OLLAMA_LLM_ORDER],
             style=questionary.Style(
                 [
@@ -198,13 +219,13 @@ if __name__ == "__main__":
         ).ask()
 
         if not model_name:
-            print("\n\nInterrupt received. Exiting...")
+            print(translate_text("cli.interrupt", language, "\n\nInterrupt received. Exiting..."))
             sys.exit(0)
 
         if model_name == "-":
-            model_name = questionary.text("Enter the custom model name:").ask()
+            model_name = questionary.text(translate_text("cli.enter_custom_model", language)).ask()
             if not model_name:
-                print("\n\nInterrupt received. Exiting...")
+                print(translate_text("cli.interrupt", language, "\n\nInterrupt received. Exiting..."))
                 sys.exit(0)
 
         # Ensure Ollama is installed, running, and the model is available
@@ -213,11 +234,14 @@ if __name__ == "__main__":
             sys.exit(1)
 
         model_provider = ModelProvider.OLLAMA.value
-        print(f"\nSelected {Fore.CYAN}Ollama{Style.RESET_ALL} model: {Fore.GREEN + Style.BRIGHT}{model_name}{Style.RESET_ALL}\n")
+        provider_text = f"{Fore.CYAN}Ollama{Style.RESET_ALL}"
+        model_text = f"{Fore.GREEN + Style.BRIGHT}{model_name}{Style.RESET_ALL}"
+        message = translate_text("cli.selected_model", language, provider=provider_text, model=model_text)
+        print(f"\n{message}\n")
     else:
         # Use the standard cloud-based LLM selection
         model_choice = questionary.select(
-            "Select your LLM model:",
+            translate_text("cli.select_llm", language, "Select your LLM model:"),
             choices=[questionary.Choice(display, value=(name, provider)) for display, name, provider in LLM_ORDER],
             style=questionary.Style(
                 [
@@ -230,7 +254,7 @@ if __name__ == "__main__":
         ).ask()
 
         if not model_choice:
-            print("\n\nInterrupt received. Exiting...")
+            print(translate_text("cli.interrupt", language, "\n\nInterrupt received. Exiting..."))
             sys.exit(0)
 
         model_name, model_provider = model_choice
@@ -239,12 +263,15 @@ if __name__ == "__main__":
         model_info = get_model_info(model_name, model_provider)
         if model_info:
             if model_info.is_custom():
-                model_name = questionary.text("Enter the custom model name:").ask()
+                model_name = questionary.text(translate_text("cli.enter_custom_model", language)).ask()
                 if not model_name:
-                    print("\n\nInterrupt received. Exiting...")
+                    print(translate_text("cli.interrupt", language, "\n\nInterrupt received. Exiting..."))
                     sys.exit(0)
 
-            print(f"\nSelected {Fore.CYAN}{model_provider}{Style.RESET_ALL} model: {Fore.GREEN + Style.BRIGHT}{model_name}{Style.RESET_ALL}\n")
+            provider_text = f"{Fore.CYAN}{model_provider}{Style.RESET_ALL}"
+            model_text = f"{Fore.GREEN + Style.BRIGHT}{model_name}{Style.RESET_ALL}"
+            message = translate_text("cli.selected_model", language, provider=provider_text, model=model_text)
+            print(f"\n{message}\n")
         else:
             model_provider = "Unknown"
             print(f"\nSelected model: {Fore.GREEN + Style.BRIGHT}{model_name}{Style.RESET_ALL}\n")
@@ -266,13 +293,13 @@ if __name__ == "__main__":
         try:
             datetime.strptime(args.start_date, "%Y-%m-%d")
         except ValueError:
-            raise ValueError("Start date must be in YYYY-MM-DD format")
+            raise ValueError(translate_text("cli.invalid_start_date", language, "Start date must be in YYYY-MM-DD format"))
 
     if args.end_date:
         try:
             datetime.strptime(args.end_date, "%Y-%m-%d")
         except ValueError:
-            raise ValueError("End date must be in YYYY-MM-DD format")
+            raise ValueError(translate_text("cli.invalid_end_date", language, "End date must be in YYYY-MM-DD format"))
 
     # Set the start and end dates
     end_date = args.end_date or datetime.now().strftime("%Y-%m-%d")
@@ -317,5 +344,6 @@ if __name__ == "__main__":
         selected_analysts=selected_analysts,
         model_name=model_name,
         model_provider=model_provider,
+        language=language,
     )
-    print_trading_output(result)
+    print_trading_output(result, language=language)

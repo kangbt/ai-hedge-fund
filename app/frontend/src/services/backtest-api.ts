@@ -22,6 +22,12 @@ export const backtestApi = {
     nodeContext: ReturnType<typeof useNodeContext>,
     flowId: string | null = null
   ): (() => void) => {
+    const formatLocalized = (zh: string, en: string): string => {
+      if (params.language === 'zh') return zh;
+      if (params.language === 'en') return en;
+      return `${zh} / ${en}`;
+    };
+
     // Create the controller for aborting the request
     const controller = new AbortController();
     const { signal } = controller;
@@ -94,14 +100,15 @@ export const backtestApi = {
                       // Create a backtest agent entry
                       nodeContext.updateAgentNode(flowId, 'backtest', {
                         status: 'IN_PROGRESS',
-                        message: 'Starting backtest...',
+                        message: formatLocalized('正在启动回测...', 'Starting backtest...'),
                         backtestResults: [],
                       });
                       break;
-                    
+
                     case 'progress':
                       // Handle individual agent updates (from actual agents during backtest)
                       if (eventData.agent && eventData.agent !== 'backtest') {
+                        const statusMessage = eventData.localized_status ?? eventData.status;
                         // Map the progress to a node status
                         let nodeStatus: NodeStatus = 'IN_PROGRESS';
                         if (eventData.status === 'Done') {
@@ -121,7 +128,7 @@ export const backtestApi = {
                         nodeContext.updateAgentNode(flowId, uniqueNodeId, {
                           status: nodeStatus,
                           ticker: eventData.ticker,
-                          message: eventData.status,
+                          message: statusMessage,
                           analysis: eventData.analysis,
                           timestamp: eventData.timestamp
                         });
@@ -142,7 +149,7 @@ export const backtestApi = {
                         // Update the node with the local backtest results
                         nodeContext.updateAgentNode(flowId, 'backtest', {
                           status: 'IN_PROGRESS',
-                          message: eventData.status,
+                          message: eventData.localized_status ?? eventData.status,
                           backtestResults: backtestResults,
                         });
                       }
@@ -165,13 +172,13 @@ export const backtestApi = {
                       // Mark the backtest agent as complete
                       nodeContext.updateAgentNode(flowId, 'backtest', {
                         status: 'COMPLETE',
-                        message: 'Backtest completed successfully',
+                        message: formatLocalized('回测已成功完成', 'Backtest completed successfully'),
                       });
-                      
+
                       // Update the output node
                       nodeContext.updateAgentNode(flowId, 'output', {
                         status: 'COMPLETE',
-                        message: 'Backtest analysis complete'
+                        message: formatLocalized('回测分析完成', 'Backtest analysis complete')
                       });
 
                       // Update flow connection state to completed

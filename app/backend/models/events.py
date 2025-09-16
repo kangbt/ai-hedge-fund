@@ -26,6 +26,7 @@ class ProgressUpdateEvent(BaseEvent):
     agent: str
     ticker: Optional[str] = None
     status: str
+    localized_status: Optional[str] = None
     timestamp: Optional[str] = None
     analysis: Optional[str] = None
 

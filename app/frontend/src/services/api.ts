@@ -89,6 +89,13 @@ export const api = {
     nodeContext: ReturnType<typeof useNodeContext>,
     flowId: string | null = null
   ): (() => void) => {
+    // Helper to localize static UI messages
+    const formatLocalized = (zh: string, en: string): string => {
+      if (params.language === 'zh') return zh;
+      if (params.language === 'en') return en;
+      return `${zh} / ${en}`;
+    };
+
     // Convert tickers string to array if needed
     if (typeof params.tickers === 'string') {
       params.tickers = (params.tickers as unknown as string).split(',').map(t => t.trim());
@@ -168,6 +175,7 @@ export const api = {
                       break;
                     case 'progress':
                       if (eventData.agent) {
+                        const statusMessage = eventData.localized_status ?? eventData.status;
                         // Map the progress to a node status
                         let nodeStatus: NodeStatus = 'IN_PROGRESS';
                         if (eventData.status === 'Done') {
@@ -185,7 +193,7 @@ export const api = {
                         nodeContext.updateAgentNode(flowId, uniqueNodeId, {
                           status: nodeStatus,
                           ticker: eventData.ticker,
-                          message: eventData.status,
+                          message: statusMessage,
                           analysis: eventData.analysis,
                           timestamp: eventData.timestamp
                         });
@@ -201,7 +209,7 @@ export const api = {
                       // Also update the output node
                       nodeContext.updateAgentNode(flowId, 'output', {
                         status: 'COMPLETE',
-                        message: 'Analysis complete'
+                        message: formatLocalized('分析完成', 'Analysis complete')
                       });
 
                       // Update flow connection state to completed

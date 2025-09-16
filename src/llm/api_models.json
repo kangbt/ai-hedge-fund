@@ -75,6 +75,16 @@
     "provider": "OpenRouter"
   },
   {
+    "display_name": "Qwen Turbo (DashScope)",
+    "model_name": "qwen-turbo",
+    "provider": "Alibaba"
+  },
+  {
+    "display_name": "Qwen Plus (DashScope)",
+    "model_name": "qwen-plus",
+    "provider": "Alibaba"
+  },
+  {
     "display_name": "GigaChat-2-Max",
     "model_name": "GigaChat-2-Max",
     "provider": "GigaChat"
